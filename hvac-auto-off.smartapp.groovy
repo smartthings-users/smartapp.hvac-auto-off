@@ -1,82 +1,88 @@
 /**
  *  HVAC Auto Off
  *
- *  Author: Brian Steere
- *  Code: https://github.com/smartthings-users/smartapp.hvac-auto-off
- *
- * Copyright (C) 2013 Brian Steere <dianoga7@3dgo.net>
- * Permission is hereby granted, free of charge, to any person obtaining a copy of this
- * software and associated documentation files (the "Software"), to deal in the Software
- * without restriction, including without limitation the rights to use, copy, modify,
- * merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
- * permit persons to whom the Software is furnished to do so, subject to the following
- * conditions: The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
- * INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
- * PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
- * HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
- * CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE
- * OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *  Author: dianoga7@3dgo.net
+ *  Date: 2013-07-21
  */
-preferences {
-    section("Control") {
-        input("thermostat", "capability.thermostat", title: "Thermostat")
-    }
 
+// Automatically generated. Make future change here.
+definition(
+    name: "Thermostat Auto Off",
+    namespace: "dianoga",
+    author: "dianoga7@3dgo.net",
+    description: "Automatically turn off thermostat when windows/doors open. Turn it back on when everything is closed up.",
+    category: "Green Living",
+    iconUrl: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience.png",
+    iconX2Url: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience%402x.png",
+    oauth: true
+)
+
+preferences {
+	section("Control") {
+		input("thermostat", "capability.thermostat", title: "Thermostat")
+	}
+    
     section("Open/Close") {
-        input("sensors", "capability.contactSensor", title: "Sensors", multiple: true)
-        input("delay", "number", title: "Delay (minutes)")
+    	input("sensors", "capability.contactSensor", title: "Sensors", multiple: true)
+        input("delay", "number", title: "Delay (seconds) before turning thermostat off")
     }
 }
 
 def installed() {
-    log.debug "Installed with settings: ${settings}"
+	log.debug "Installed with settings: ${settings}"
 
-    initialize()
+	initialize()
 }
 
 def updated() {
-    log.debug "Updated with settings: ${settings}"
+	log.debug "Updated with settings: ${settings}"
 
-    unsubscribe()
+	unsubscribe()
     unschedule()
-    initialize()
+	initialize()
 }
 
 def initialize() {
-    state.changed = false
-    subscribe(sensors, 'contact', "sensorChange")
+	state.changed = false
+	subscribe(sensors, 'contact', "sensorChange")
 }
 
 def sensorChange(evt) {
-    log.debug "Desc: $evt.value , $state"
+	log.debug "Desc: $evt.value , $state"
     if(evt.value == 'open' && !state.changed) {
-        unschedule()
-        runIn(delay * 60, 'turnOff')
-    } else if(evt.value == 'closed' && state.changed) {
-        // All closed?
-        def isOpen = false
-        for(sensor in sensors) {
-            if(sensor.id != evt.deviceId && sensor.currentValue('contact') == 'open') {
-                isOpen = true
-            }
-        }
-
-        if(!isOpen) {
-            unschedule()
-            runIn(delay * 60, 'restore')
+    	log.debug "Scheduling turn off in $delay seconds"
+        state.scheduled = true;
+        runIn(delay, 'turnOff')
+    } else if(evt.value == 'closed' && (state.changed || state.scheduled)) {        
+        if(!isOpen()) {
+        	log.debug "Everything is closed, restoring thermostat"
+            state.scheduled = false;
+            unschedule('turnOff')
+			restore()
+        } else {
+        	log.debug "Something is still open."
         }
     }
 }
 
+def isOpen() {
+	def result = sensors.find() { it.currentValue('contact') == 'open'; }
+    log.debug "isOpen results: $result"
+    
+    return result
+}
+
 def turnOff() {
-    log.debug "Turning off thermostat due to contact open"
-    state.thermostatMode = thermostat.currentValue("thermostatMode")
-    thermostat.off()
-    state.changed = true
-    log.debug "State: $state"
+	log.debug "Preparing to turn off thermostat due to contact open"
+    if(isOpen()) {
+    	log.debug "It's safe. Turning it off."
+		state.thermostatMode = thermostat.currentValue("thermostatMode")
+        state.changed = true
+    	thermostat.off()
+    	log.debug "State: $state"
+    } else {
+    	log.debug "Just kidding. The platform did something bad."
+    }
 }
 
 def restore() {
