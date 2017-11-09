@@ -3,6 +3,7 @@
  *
  *  Author: dianoga7@3dgo.net
  *  Date: 2013-07-21
+ *  Update: 2017-10-30 by github: gunkl - Do not turn off if the contact has closed before we get around to changing the thermostat state.
  */
 
 // Automatically generated. Make future change here.
@@ -24,18 +25,18 @@ preferences {
     
     section("Open/Close") {
     	input("sensors", "capability.contactSensor", title: "Sensors", multiple: true)
-        input("delay", "number", title: "Delay (seconds) before turning thermostat off")
+        input("delay", "number", title: "Delay (seconds)")
     }
 }
 
 def installed() {
-	log.debug "Installed with settings: ${settings}"
+	log.debug "HVAC auto off: Installed with settings: ${settings}"
 
 	initialize()
 }
 
 def updated() {
-	log.debug "Updated with settings: ${settings}"
+	log.debug "HVAC auto off: Updated with settings: ${settings}"
 
 	unsubscribe()
     unschedule()
@@ -48,45 +49,43 @@ def initialize() {
 }
 
 def sensorChange(evt) {
-	log.debug "Desc: $evt.value , $state"
+	log.debug "HVAC auto off: Desc: $evt.value , $state"
+    state.sensorvalue = "$evt.value"
     if(evt.value == 'open' && !state.changed) {
-    	log.debug "Scheduling turn off in $delay seconds"
-        state.scheduled = true;
+    	unschedule()
         runIn(delay, 'turnOff')
-    } else if(evt.value == 'closed' && (state.changed || state.scheduled)) {        
-        if(!isOpen()) {
-        	log.debug "Everything is closed, restoring thermostat"
-            state.scheduled = false;
-            unschedule('turnOff')
-			restore()
-        } else {
-        	log.debug "Something is still open."
+    } else if(evt.value == 'closed' && state.changed) {
+    	// All closed?
+        def isOpen = false
+        for(sensor in sensors) {
+        	if(sensor.id != evt.deviceId && sensor.currentValue('contact') == 'open') {
+        		isOpen = true
+            }
+        }
+        
+        if(!isOpen) {
+        	unschedule()
+        	runIn(delay, 'restore')
         }
     }
 }
 
-def isOpen() {
-	def result = sensors.find() { it.currentValue('contact') == 'open'; }
-    log.debug "isOpen results: $result"
-    
-    return result
-}
-
 def turnOff() {
-	log.debug "Preparing to turn off thermostat due to contact open"
-    if(isOpen()) {
-    	log.debug "It's safe. Turning it off."
+	if (state.sensorvalue == 'open') {
+		log.debug "HVAC auto off: Turning off thermostat due to contact open"
 		state.thermostatMode = thermostat.currentValue("thermostatMode")
-        state.changed = true
-    	thermostat.off()
-    	log.debug "State: $state"
-    } else {
-    	log.debug "Just kidding. The platform did something bad."
+		thermostat.off()
+    	state.changed = true
     }
+    if (state.sensorvalue == 'closed') {
+    	state.changed = false
+        log.debug "HVAC auto off: Not turning off thermostat, the contact closed before the delay expired."
+    }
+    log.debug "HVAC auto off: State: $state"
 }
 
 def restore() {
-    log.debug "Setting thermostat to $state.thermostatMode"
+    log.debug "HVAC auto off: State: $state - Setting thermostat to $state.thermostatMode"
     thermostat.setThermostatMode(state.thermostatMode)
     state.changed = false
 }
